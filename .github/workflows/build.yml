@@ -63,6 +63,8 @@ jobs:
       
       - name: Run cFS
         run: |
-          cd build/exe/cpu1/
-          ./core-cpu1
+          ./core-cpu1 > cFS_startup_cpu1.txt &
+          sleep 30
+          ../host/cmdUtil --endian=LE --pktid=0x1806 --cmdcode=2 --half=0x0002
+        working-directory: ./build/exe/cpu1/
   
