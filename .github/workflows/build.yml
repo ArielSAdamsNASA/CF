@@ -49,7 +49,7 @@ jobs:
           ls
       - name: ls two
         run: |
-          cd cFS
+          cd cFS/apps
           ls
           
       - name: Add CF app
