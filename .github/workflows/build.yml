@@ -45,7 +45,7 @@ jobs:
           
       - name: ls
         run: |
-          cd cfe
+          cd apps
           ls
           
       - name: Add CF app
