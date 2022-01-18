@@ -41,7 +41,7 @@ jobs:
       - name: Checkout CF
         uses: actions/checkout@v2
         with:
-          path: apps
+          path: cFS/apps
           
       - name: ls
         run: |
