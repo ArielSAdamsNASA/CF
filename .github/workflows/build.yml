@@ -43,6 +43,9 @@ jobs:
         with:
           path: apps
           
+      - name: ls
+        run: ls
+          
       - name: Add CF app
         run: |
           sudo apt-get install sed -y
