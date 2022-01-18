@@ -46,11 +46,10 @@ jobs:
           
       - name: ls
         run: |
-          cd ../../
           ls
       - name: ls two
         run: |
-          cd ../../../
+          cd cFS
           ls
           
       - name: Add CF app
