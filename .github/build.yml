@@ -1,0 +1,70 @@
+name: Build, Test, and Run [OMIT_DEPRECATED = true]
+
+# Run every time a new commit pushed or for pull requests
+on:
+  push:
+  pull_request:
+
+env:
+  SIMULATION: native
+  OMIT_DEPRECATED: true
+  ENABLE_UNIT_TESTS: true
+
+jobs:
+  #Checks for duplicate actions. Skips push actions if there is a matching or duplicate pull-request action. 
+  check-for-duplicates:
+    runs-on: ubuntu-latest
+    # Map a step output to a job output
+    outputs:
+        should_skip: ${{ steps.skip_check.outputs.should_skip }}
+    steps:
+      - id: skip_check
+        uses: fkirc/skip-duplicate-actions@master
+        with:
+          concurrent_skipping: 'same_content'
+          skip_after_successful_duplicate: 'true'
+          do_not_skip: '["pull_request", "workflow_dispatch", "schedule"]'
+    
+  setup:
+    needs: check-for-duplicates
+    if: ${{ needs.check-for-duplicates.outputs.should_skip != 'true' }}
+    
+    steps:
+      - name: Checkout bundle
+        uses: actions/checkout@v2
+        with:
+          repository: nasa/cFS
+          submodules: true 
+
+      - name: Checkout CF
+        uses: actions/checkout@v2
+        with:
+          path: apps
+          
+      - name: Add CF app
+        run: |
+        get-apt install sed 
+        sed -i -e 's/CFE_APP, sch_lab, SCH_Lab_AppMain, SCH_LAB_APP, 80, 16384, 0x0, 0;/ CFE_APP, CF, CF_AppMain, CF_APP, 80, 16384, 0x0, 0; /g' /cfs/cFS/cfe/cmake/sample_defs/cpu1_cfe_es_startup.scr
+        sed -i -e 's/add_cfe_tables(cf fsw/tables/cf_def_config.c)/ add_cfe_tables(CF_config_table fsw/tables/cf_def_config.c) /g' /apps/CF/CMakeLists.txt
+        sed -i -e 's/SET(cpu1_APPLIST ci_lab to_lab sch_lab)/ SET(cpu1_APPLIST ci_lab to_lab sch_lab CF) /g' /cfe/cmake/sample_defs/targets.cmake 
+
+  build-and-run:
+    needs: setup
+    
+     # Setup the build system
+      - name: Set up for build
+        run: |
+          cp ./cfe/cmake/Makefile.sample Makefile
+          cp -r ./cfe/cmake/sample_defs sample_defs
+          make prep
+          
+      # Setup the build system
+      - name: Make Install
+        run: make install
+        
+
+      - name: Run cFS
+        run: |
+          cd build/exe/cpu1/
+          ./core-cpu1
+  
