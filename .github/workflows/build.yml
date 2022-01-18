@@ -37,15 +37,20 @@ jobs:
         with:
           repository: nasa/cFS
           submodules: true 
+          path: cFS
 
       - name: Checkout CF
         uses: actions/checkout@v2
         with:
-          path: CF/apps
+          path: cFS/apps
           
       - name: ls
         run: |
-          cd ../
+          cd ../../
+          ls
+      - name: ls two
+        run: |
+          cd ../../../
           ls
           
       - name: Add CF app
