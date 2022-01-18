@@ -41,11 +41,11 @@ jobs:
       - name: Checkout CF
         uses: actions/checkout@v2
         with:
-          path: cFS/apps
+          path: CF/apps
           
       - name: ls
         run: |
-          cd apps
+          cd ../
           ls
           
       - name: Add CF app
