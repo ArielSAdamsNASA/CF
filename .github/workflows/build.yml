@@ -39,9 +39,9 @@ jobs:
           submodules: true 
 
       - name: Checkout CF
-        uses: actions/checkout@v2
-        with:
-          path: apps
+        run: |
+          cd apps
+          git clone https://github.com/nasa/CF.git
           
       - name: Add CF app
         run: |
