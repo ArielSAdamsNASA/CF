@@ -1,469 +1,690 @@
 /************************************************************************
-** File: cf_cfdp.h
-**
-** NASA Docket No. GSC-18,447-1, and identified as “CFS CFDP (CF)
-** Application version 3.0.0”
-** Copyright © 2019 United States Government as represented by the
-** Administrator of the National Aeronautics and Space Administration.
-** All Rights Reserved.
-** Licensed under the Apache License, Version 2.0 (the "License"); you may
-** not use this file except in compliance with the License. You may obtain
-** a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-**
-** Unless required by applicable law or agreed to in writing, software
-** distributed under the License is distributed on an "AS IS" BASIS,
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-** See the License for the specific language governing permissions and
-** limitations under the License.
-**
-**
-** Purpose:
-**  The CF Application cfdp engine and packet parsing header file
-**
-**
-**
-*************************************************************************/
+ *
+ * NASA Docket No. GSC-18,447-1, and identified as “CFS CFDP (CF)
+ * Application version 3.0.0”
+ * Copyright © 2019 United States Government as represented by the
+ * Administrator of the National Aeronautics and Space Administration.
+ * All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License. You may obtain
+ * a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ************************************************************************/
+
+/**
+ * @file
+ *
+ *  The CF Application cfdp engine and packet parsing header file
+ */
 
 #ifndef CF_CFDP_H
 #define CF_CFDP_H
 
-#include "cfe.h"
-#include "cf_cfdp_pdu.h"
-#include "cf_crc.h"
-#include "cf_timer.h"
-#include "cf_clist.h"
-#include "cf_chunk.h"
-
-#define CF_NUM_TRANSACTIONS_PER_CHANNEL                                                \
-    (CF_MAX_COMMANDED_PLAYBACK_FILES_PER_CHAN + CF_MAX_SIMULTANEOUS_RX +               \
-     ((CF_MAX_POLLING_DIR_PER_CHAN + CF_MAX_COMMANDED_PLAYBACK_DIRECTORIES_PER_CHAN) * \
-      CF_NUM_TRANSACTIONS_PER_PLAYBACK))
-#define CF_NUM_TRANSACTIONS (CF_NUM_CHANNELS * CF_NUM_TRANSACTIONS_PER_CHANNEL)
-
-#define CF_NUM_HISTORIES (CF_NUM_CHANNELS * CF_NUM_HISTORIES_PER_CHANNEL)
-
-#define CF_NUM_CHUNKS_ALL_CHANNELS (CF_TOTAL_CHUNKS * CF_NUM_TRANSACTIONS_PER_CHANNEL)
-
-typedef enum
-{
-    CF_TxnState_IDLE    = 0,
-    CF_TxnState_R1      = 1,
-    CF_TxnState_S1      = 2,
-    CF_TxnState_R2      = 3,
-    CF_TxnState_S2      = 4,
-    CF_TxnState_DROP    = 5, /* class 1 received file data without metadata, no file info, so drop */
-    CF_TxnState_INVALID = 6
-} CF_TxnState_t;
-
-typedef enum
-{
-    CF_TxSubState_METADATA         = 0,
-    CF_TxSubState_FILEDATA         = 1,
-    CF_TxSubState_EOF              = 2,
-    CF_TxSubState_WAIT_FOR_EOF_ACK = 3,
-    CF_TxSubState_WAIT_FOR_FIN     = 4,
-    CF_TxSubState_SEND_FIN_ACK     = 5,
-    CF_TxSubState_NUM_STATES       = 6
-} CF_TxSubState_t;
-
-typedef enum
-{
-    CF_RxSubState_FILEDATA         = 0,
-    CF_RxSubState_EOF              = 1,
-    CF_RxSubState_WAIT_FOR_FIN_ACK = 2,
-    CF_RxSubState_NUM_STATES       = 3,
-} CF_RxSubState_t;
-
-typedef enum
-{
-    CF_RxEofRet_SUCCESS        = 0,
-    CF_RxEofRet_FSIZE_MISMATCH = 1,
-    CF_RxEofRet_BAD_EOF        = 2,
-    CF_RxEofRet_INVALID        = 3,
-} CF_RxEofRet_t;
-
-typedef struct
-{
-    char src_filename[CF_FILENAME_MAX_LEN];
-    char dst_filename[CF_FILENAME_MAX_LEN];
-} CF_TxnFilenames_t;
-
-typedef enum
-{
-    CF_Direction_RX  = 0,
-    CF_Direction_TX  = 1,
-    CF_Direction_NUM = 2,
-} CF_Direction_t;
-
-typedef struct CF_History
-{
-    CF_TxnFilenames_t       fnames;
-    CF_CListNode_t          cl_node;
-    CF_Direction_t          dir;
-    CF_CFDP_ConditionCode_t cc;
-    CF_EntityId_t           src_eid;  /* src_eid is always the source eid */
-    CF_EntityId_t           peer_eid; /* peer_eid is always the "other guy", which is the same src_eid for RX */
-    CF_TransactionSeq_t     seq_num;  /* stays constant for entire transfer */
-} CF_History_t;
-
-typedef struct CF_ChunkWrapper
-{
-    CF_ChunkList_t chunks;
-    CF_CListNode_t cl_node;
-} CF_ChunkWrapper_t;
-
-typedef struct CF_Playback
-{
-    uint32            dir_id;
-    CF_CFDP_Class_t   cfdp_class;
-    CF_TxnFilenames_t fnames;
-    uint16            num_ts; /* number of transactions -- 16 bit should be enough */
-    uint8             priority;
-    CF_EntityId_t     dest_id;
-
-    bool busy;
-    bool diropen;
-    bool keep;
-    bool counted;
-} CF_Playback_t;
-
-typedef struct CF_Poll
-{
-    CF_Playback_t pb;
-    CF_Timer_t    interval_timer;
-    bool          timer_set;
-} CF_Poll_t;
-
-typedef struct CF_TxS2_Data
-{
-    uint8 fin_cc; /* remember the cc in the received fin pdu to echo in eof-fin */
-    uint8 acknak_count;
-} CF_TxS2_Data_t;
-
-typedef struct CF_TxState_Data
-{
-    CF_TxSubState_t sub_state;
-    uint32          cached_pos;
-
-    CF_TxS2_Data_t s2;
-} CF_TxState_Data_t;
-
-typedef struct CF_RxS2_Data
-{
-    uint32                    eof_crc;
-    uint32                    eof_size;
-    uint32                    rx_crc_calc_bytes;
-    CF_CFDP_FinDeliveryCode_t dc;
-    CF_CFDP_FinFileStatus_t   fs;
-    uint8                     eof_cc; /* remember the cc in the received eof pdu to echo in eof-ack */
-    uint8                     acknak_count;
-} CF_RxS2_Data_t;
-
-typedef struct CF_RxState_Data
-{
-    CF_RxSubState_t sub_state;
-    uint32          cached_pos;
-
-    CF_RxS2_Data_t r2;
-} CF_RxState_Data_t;
-
-typedef struct CF_Flags_Common
-{
-    uint8 q_index; /* which Q is this in? */
-    bool  ack_timer_armed;
-    bool  suspended;
-    bool  canceled;
-    bool  crc_calc;
-} CF_Flags_Common_t;
-
-typedef struct CF_Flags_Rx
-{
-    CF_Flags_Common_t com;
-
-    bool md_recv; /* md received for r state */
-    bool eof_recv;
-    bool send_nak;
-    bool send_fin;
-    bool send_ack;
-    bool inactivity_fired; /* used for r2 */
-    bool complete;         /* r2 */
-    bool fd_nak_sent;      /* latches that at least one nak has been sent for file data */
-} CF_Flags_Rx_t;
-
-typedef struct CF_Flags_Tx
-{
-    CF_Flags_Common_t com;
-
-    bool md_need_send;
-    bool cmd_tx; /* indicates transaction is commanded (ground) tx */
-} CF_Flags_Tx_t;
-
-typedef union CF_StateFlags
-{
-    CF_Flags_Common_t com;
-    CF_Flags_Rx_t     rx;
-    CF_Flags_Tx_t     tx;
-} CF_StateFlags_t;
-
-typedef union CF_StateData
-{
-    CF_TxState_Data_t s;
-    CF_RxState_Data_t r;
-} CF_StateData_t;
-
-typedef struct CF_Transaction
-{
-    CF_TxnState_t state; /* each engine is commanded to do something, which is the overall state */
-
-    CF_History_t      *history;          /* weird, but this also holds active filenames and possibly other info */
-    CF_ChunkWrapper_t *chunks;           /* for gap tracking, only used on class 2 */
-    CF_Timer_t         inactivity_timer; /* set to the overall inactivity timer of a remote */
-    CF_Timer_t         ack_timer;        /* called ack_timer, but is also nak_timer */
-
-    uint32    fsize; /* lseek() should be 64-bit on 64-bit system, but osal limits to 32-bit */
-    uint32    foffs; /* offset into file for next read */
-    osal_id_t fd;
-
-    CF_Crc_t crc;
-
-    uint8 keep;
-    uint8 chan_num; /* if ever more than one engine, this may need to change to pointer */
-    uint8 priority;
-
-    CF_CListNode_t cl_node;
-
-    CF_Playback_t *p; /* NULL if transaction does not belong to a playback */
-
-    CF_StateData_t state_data;
-
-    /* NOTE: the flags here look a little strange, because there are different flags for TX and RX.
-     * Both types share the same type of flag, though. Since RX flags plus the global flags is
-     * over one byte, storing them this way allows 2 bytes to cover all possible flags.
-     * Please ignore the duplicate declarations of the "all" flags. :) */
-    CF_StateFlags_t flags;
-
-} CF_Transaction_t;
-
-typedef enum
-{
-    CF_QueueIdx_PEND      = 0, /* first one on this list is active */
-    CF_QueueIdx_TXA       = 1,
-    CF_QueueIdx_TXW       = 2,
-    CF_QueueIdx_RX        = 3,
-    CF_QueueIdx_HIST      = 4,
-    CF_QueueIdx_HIST_FREE = 5,
-    CF_QueueIdx_FREE      = 6,
-    CF_QueueIdx_NUM       = 7,
-} CF_QueueIdx_t;
-
-typedef enum
-{
-    CF_SendRet_SUCCESS = 0,
-    CF_SendRet_NO_MSG  = 1,
-    CF_SendRet_ERROR   = 2, /* the send itself failed */
-    CF_SendRet_FAILURE = 3, /* generic failure message not relating to message send */
-} CF_SendRet_t;
-
-typedef enum
-{
-    CF_TickType_RX,
-    CF_TickType_TXW_NORM,
-    CF_TickType_TXW_NAK,
-    CF_TickType_NUM_TYPES
-} CF_TickType_t;
-
-typedef struct CF_Channel
-{
-    CF_CListNode_t *qs[CF_QueueIdx_NUM];
-    CF_CListNode_t *cs[CF_Direction_NUM];
-
-    CFE_SB_PipeId_t pipe;
-
-    uint32 num_cmd_tx;
-
-    CF_Playback_t playback[CF_MAX_COMMANDED_PLAYBACK_DIRECTORIES_PER_CHAN];
-
-    /* For polling directories, the configuration data is in a table. */
-    CF_Poll_t poll[CF_MAX_POLLING_DIR_PER_CHAN];
-
-    uint32 sem_id; /* semaphore id for output pipe */
-
-    const CF_Transaction_t *cur; /* current transaction during channel cycle */
-
-    uint8 tick_type;
-} CF_Channel_t;
-
-typedef struct CF_Output
-{
-    CFE_SB_Buffer_t *msg;
-} CF_Output_t;
-
-typedef struct CF_Input
-{
-    CFE_SB_Buffer_t    *msg;
-    CFE_MSG_Size_t      bytes_received;
-    CF_EntityId_t       src;
-    CF_EntityId_t       dst;
-    CF_TransactionSeq_t tsn;
-} CF_Input_t;
-
-/* An engine represents a pairing to a local EID
- *
- * Each engine can have at most CF_MAX_SIMULTANEOUS_TRANSACTIONS */
-typedef struct CF_Engine
-{
-    CF_TransactionSeq_t seq_num; /* keep track of the next sequence number to use for sends */
-
-    CF_Output_t out;
-    CF_Input_t  in;
-
-    /* NOTE: could have separate array of transactions as part of channel? */
-    CF_Transaction_t transactions[CF_NUM_TRANSACTIONS];
-    CF_History_t     histories[CF_NUM_HISTORIES];
-    CF_Channel_t     channels[CF_NUM_CHANNELS];
-
-    CF_ChunkWrapper_t chunks[CF_NUM_TRANSACTIONS * CF_Direction_NUM];
-    CF_Chunk_t        chunk_mem[CF_NUM_CHUNKS_ALL_CHANNELS];
-
-    uint32 outgoing_counter;
-    uint8  enabled;
-} CF_Engine_t;
+#include "cf_cfdp_types.h"
 
 /**
- * @brief A function for dispatching actions to a handler, without existing PDU data
- *
- * This allows quick delegation to handler functions using dispatch tables.  This version is
- * used on the transmit side, where a PDU will likely be generated/sent by the handler being
- * invoked.
- *
- * @param[inout] t  The transaction object
+ * @brief Structure for use with the CF_CFDP_CycleTx() function
  */
-typedef void (*CF_CFDP_StateSendFunc_t)(CF_Transaction_t *t);
-
-/**
- * @brief A function for dispatching actions to a handler, with existing PDU data
- *
- * This allows quick delegation of PDUs to handler functions using dispatch tables.  This version is
- * used on the receive side where a PDU buffer is associated with the activity, which is then
- * interpreted by the handler being invoked.
- *
- * @param[inout] t  The transaction object
- * @param[inout] ph The PDU buffer currently being received/processed
- */
-typedef void (*CF_CFDP_StateRecvFunc_t)(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-
-/**
- * @brief A table of receive handler functions based on file directive code
- *
- * For PDUs identified as a "file directive" type - generally anything other
- * than file data - this provides a table to branch to a different handler
- * function depending on the value of the file directive code.
- */
-typedef struct
+typedef struct CF_CFDP_CycleTx_args
 {
-    /* a separate recv handler for each possible file directive PDU in this state */
-    CF_CFDP_StateRecvFunc_t fdirective[CF_CFDP_FileDirective_INVALID_MAX];
-} CF_CFDP_FileDirectiveDispatchTable_t;
+    CF_Channel_t *c;       /**< channel structure */
+    int           ran_one; /**< should be set to 1 if a transaction was cycled */
+} CF_CFDP_CycleTx_args_t;
 
 /**
- * @brief A table of transmit handler functions based on transaction state
- *
- * This reflects the main dispatch table for the transmit side of a transaction.
- * Each possible state has a corresponding function pointer in the table to implement
- * the PDU transmit action(s) associated with that state.
+ * @brief Structure for use with the CF_CFDP_DoTick() function
  */
-typedef struct
+typedef struct CF_CFDP_Tick_args
 {
-    CF_CFDP_StateSendFunc_t tx[CF_TxnState_INVALID];
-} CF_CFDP_TxnSendDispatchTable_t;
+    CF_Channel_t *c;                       /* IN param */
+    void (*fn)(CF_Transaction_t *, int *); /* IN param */
+    int early_exit;                        /* OUT param */
+    int cont;                              /* if 1, then re-traverse the list */
+} CF_CFDP_Tick_args_t;
 
+/********************************************************************************/
 /**
- * @brief A table of receive handler functions based on transaction state
+ * @brief Initiate the process of encoding a new PDU to send
  *
- * This reflects the main dispatch table for the receive side of a transaction.
- * Each possible state has a corresponding function pointer in the table to implement
- * the PDU receive action(s) associated with that state.
+ * This resets the encoder and PDU buffer to initial values, and prepares for encoding a new PDU
+ * for sending to a remote entity.
+ *
+ * @param penc           Encoder state structure, will be reset/initialized by this call to point to msgbuf.
+ * @param msgbuf         Pointer to encapsulation message, in this case a CFE software bus message
+ * @param ph             Pointer to logical PDU buffer content, will be cleared to all zero by this call
+ * @param encap_hdr_size Offset of first CFDP PDU octet within buffer
+ * @param msgbuf_size    Allocated size of msgbuf encapsulation structure (encoding cannot exceed this)
  */
-typedef struct
-{
-    /* a separate recv handler for each possible file directive PDU in this state */
-    CF_CFDP_StateRecvFunc_t rx[CF_TxnState_INVALID];
-} CF_CFDP_TxnRecvDispatchTable_t;
+void CF_CFDP_EncodeStart(CF_EncoderState_t *penc, void *msgbuf, CF_Logical_PduBuffer_t *ph, size_t encap_hdr_size,
+                         size_t total_size);
 
-/* NOTE: functions grouped together on contiguous lines are in groups that are described by
- * a simple comment at the top. Other comments below that apply to the whole group. */
-/* reset functions */
-extern void CF_CFDP_ResetTransaction(CF_Transaction_t *t, int keep_history);
-extern void CF_CFDP_ResetHistory(CF_Channel_t *c, CF_History_t *t);
+/********************************************************************************/
+/**
+ * @brief Initiate the process of decoding a receieved PDU
+ *
+ * This resets the decoder and PDU buffer to initial values, and prepares for decoding a new PDU
+ * that was received from a remote entity.
+ *
+ * @param pdec           Decoder state structure, will be reset/initialized by this call to point to msgbuf.
+ * @param msgbuf         Pointer to encapsulation message, in this case a CFE software bus message
+ * @param ph             Pointer to logical PDU buffer content, will be cleared to all zero by this call
+ * @param encap_hdr_size Offset of first CFDP PDU octet within buffer
+ * @param msgbuf_size    Total size of msgbuf encapsulation structure (decoding cannot exceed this)
+ */
+void CF_CFDP_DecodeStart(CF_DecoderState_t *pdec, const void *msgbuf, CF_Logical_PduBuffer_t *ph, size_t encap_hdr_size,
+                         size_t total_size);
 
 /* engine execution functions */
-extern int32 CF_CFDP_InitEngine(void);
-extern void  CF_CFDP_CycleEngine(void);
-extern void  CF_CFDP_DisableEngine(void);
 
-/* ground commands into the engine */
-/* returns NULL on err */
-extern int32 CF_CFDP_TxFile(const char src_filename[CF_FILENAME_MAX_LEN], const char dst_filename[CF_FILENAME_MAX_LEN],
-                            CF_CFDP_Class_t cfdp_class, uint8 keep, uint8 chan, uint8 priority, CF_EntityId_t dest_id);
-extern int32 CF_CFDP_PlaybackDir(const char src_filename[CF_FILENAME_MAX_LEN],
-                                 const char dst_filename[CF_FILENAME_MAX_LEN], CF_CFDP_Class_t cfdp_class, uint8 keep,
-                                 uint8 chan, uint8 priority, uint16 dest_id);
+/************************************************************************/
+/** @brief Reset a transaction and all its internals to an unused state.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t  Pointer to the transaction object
+ * @param keep_history Whether the transaction info should be preserved in history
+ */
+void CF_CFDP_ResetTransaction(CF_Transaction_t *t, int keep_history);
 
-/* PDU send functions */
-/* CF_CFDP_ConstructPduHeader sets length of 0. Must set it after building packet */
-extern CF_CFDP_PduHeader_t *CF_CFDP_ConstructPduHeader(const CF_Transaction_t *t, uint8 directive_code,
-                                                       CF_EntityId_t src_eid, CF_EntityId_t dst_eid,
-                                                       uint8 towards_sender, CF_TransactionSeq_t tsn, int silent);
-extern CF_SendRet_t         CF_CFDP_SendMd(CF_Transaction_t *t);
-extern CF_SendRet_t         CF_CFDP_SendFd(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph, uint32 offset, int len);
-extern CF_SendRet_t         CF_CFDP_SendEof(CF_Transaction_t *t);
-/* NOTE: CF_CFDP_SendAck() takes a CF_TransactionSeq_t instead of getting it from transaction history because
+/************************************************************************/
+/** @brief Initialization function for the cfdp engine
+ *
+ * @par Description
+ *       Performs all initialization of the CFDP engine
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       Only called once.
+ *
+ * @retval #CFE_SUCCESS \copydoc CFE_SUCCESSS
+ * @returns anything else on error.
+ *
+ */
+int32 CF_CFDP_InitEngine(void);
+
+/************************************************************************/
+/** @brief Cycle the engine. Called once per wakeup.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       None
+ *
+ */
+void CF_CFDP_CycleEngine(void);
+
+/************************************************************************/
+/** @brief Disables the cfdp engine and resets all state in it.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       None
+ *
+ */
+void CF_CFDP_DisableEngine(void);
+
+/************************************************************************/
+/** @brief Begin transmit of a file.
+ *
+ * @par Description
+ *       This function sets up a transaction for and starts transmit of
+ *       the given filename.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       src_filename must not be NULL. dst_filename must not be NULL.
+ *
+ * @param src_filename  Local filename
+ * @param dst_filename  Remote filename
+ * @param cfdp_class    Whether to perform a class 1 or class 2 transfer
+ * @param keep          Whether to keep or delete the local file after completion
+ * @param chan          CF channel number to use
+ * @param priority      CF priority level
+ * @param dest_id       Entity ID of remote receiver
+ *
+ * @retval #CFE_SUCCESS \copydoc CFE_SUCCESSS
+ * @returns Anything else on error.
+ */
+int32 CF_CFDP_TxFile(const char *src_filename, const char *dst_filename, CF_CFDP_Class_t cfdp_class, uint8 keep,
+                     uint8 chan, uint8 priority, CF_EntityId_t dest_id);
+
+/************************************************************************/
+/** @brief Begin transmit of a directory.
+ *
+ * @par Description
+ *       This function sets up CF_Playback_t structure with state so it can
+ *       become part of the directory polling done at each engine cycle.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       src_filename must not be NULL. dst_filename must not be NULL.
+ *
+ * @param src_filename  Local filename
+ * @param dst_filename  Remote filename
+ * @param cfdp_class    Whether to perform a class 1 or class 2 transfer
+ * @param keep          Whether to keep or delete the local file after completion
+ * @param chan          CF channel number to use
+ * @param priority      CF priority level
+ * @param dest_id       Entity ID of remote receiver
+ *
+ * @retval #CFE_SUCCESS \copydoc CFE_SUCCESSS
+ * @returns Anything else on error.
+ */
+int32 CF_CFDP_PlaybackDir(const char *src_filename, const char *dst_filename, CF_CFDP_Class_t cfdp_class, uint8 keep,
+                          uint8 chan, uint8 priority, uint16 dest_id);
+
+/************************************************************************/
+/** @brief Build the PDU header in the output buffer to prepare to send a packet.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t              Pointer to the transaction object
+ * @param directive_code Code to use for file directive headers (set to 0 for data)
+ * @param src_eid        Value to set in source entity ID field
+ * @param dst_eid        Value to set in destination entity ID field
+ * @param towards_sender Whether this is transmitting toward the sender entity
+ * @param tsn            Transaction sequence number to put into PDU
+ * @param silent         If true, supresses error event if no message buffer available
+ *
+ * @returns Pointer to PDU buffer which may be filled with additional data
+ * @retval  NULL if no message buffer available
+ */
+CF_Logical_PduBuffer_t *CF_CFDP_ConstructPduHeader(const CF_Transaction_t *t, CF_CFDP_FileDirective_t directive_code,
+                                                   CF_EntityId_t src_eid, CF_EntityId_t dst_eid, bool towards_sender,
+                                                   CF_TransactionSeq_t tsn, bool silent);
+
+/************************************************************************/
+/** @brief Build a metadata PDU for transmit.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t              Pointer to the transaction object
+ *
+ * @returns CF_SendRet_t status code
+ * @retval CF_SendRet_SUCCESS on success.
+ * @retval CF_SendRet_NO_MSG if message buffer cannot be obtained.
+ * @retval CF_SendRet_ERROR if an error occurred while building the packet.
+ */
+CF_SendRet_t CF_CFDP_SendMd(CF_Transaction_t *t);
+
+/************************************************************************/
+/** @brief Send a previously-assembled filedata PDU for transmit.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t   Pointer to the transaction object
+ * @param ph  Pointer to logical PDU buffer content
+ *
+ * @note Unlike other "send" routines, the file data PDU must be acquired and
+ * filled by the caller prior to invoking this routine.  This routine only
+ * sends the PDU that was previously allocated and assembled.  As such, the
+ * typical failure possibilies do not apply to this call.
+ *
+ * @returns CF_SendRet_t status code
+ * @retval CF_SendRet_SUCCESS on success.
+ */
+CF_SendRet_t CF_CFDP_SendFd(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Build a eof PDU for transmit.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t   Pointer to the transaction object
+ *
+ * @returns CF_SendRet_t status code
+ * @retval CF_SendRet_SUCCESS on success.
+ * @retval CF_SendRet_NO_MSG if message buffer cannot be obtained.
+ * @retval CF_SendRet_ERROR if an error occurred while building the packet.
+ */
+CF_SendRet_t CF_CFDP_SendEof(CF_Transaction_t *t);
+
+/************************************************************************/
+/** @brief Build a ack PDU for transmit.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @note CF_CFDP_SendAck() takes a CF_TransactionSeq_t instead of getting it from transaction history because
  * of the special case where a FIN-ACK must be sent for an unknown transaction. It's better for
  * long term maintenance to not build an incomplete CF_History_t for it.
+ *
+ * @param t        Pointer to the transaction object
+ * @param ts       Transaction ACK status
+ * @param dir_code File directive code being ACK'ed
+ * @param cc       Condition code of transaction
+ * @param peer_eid Remote entity ID
+ * @param tsn      Transaction sequence number
+ *
+ * @returns CF_SendRet_t status code
+ * @retval CF_SendRet_SUCCESS on success.
+ * @retval CF_SendRet_NO_MSG if message buffer cannot be obtained.
+ * @retval CF_SendRet_ERROR if an error occurred while building the packet.
+ *
  */
-extern CF_SendRet_t CF_CFDP_SendAck(CF_Transaction_t *t, CF_CFDP_AckTxnStatus_t ts, CF_CFDP_FileDirective_t dir_code,
-                                    CF_CFDP_ConditionCode_t cc, CF_EntityId_t peer_eid, CF_TransactionSeq_t tsn);
-extern CF_SendRet_t CF_CFDP_SendFin(CF_Transaction_t *t, CF_CFDP_FinDeliveryCode_t dc, CF_CFDP_FinFileStatus_t fs,
-                                    CF_CFDP_ConditionCode_t cc);
-extern CF_SendRet_t CF_CFDP_SendNak(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph, int num_segment_requests);
+CF_SendRet_t CF_CFDP_SendAck(CF_Transaction_t *t, CF_CFDP_AckTxnStatus_t ts, CF_CFDP_FileDirective_t dir_code,
+                             CF_CFDP_ConditionCode_t cc, CF_EntityId_t peer_eid, CF_TransactionSeq_t tsn);
 
-/* PDU receive functions */
-/* returns 0 on success */
-extern int CF_CFDP_RecvMd(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern int CF_CFDP_RecvFd(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern int CF_CFDP_RecvEof(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern int CF_CFDP_RecvAck(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern int CF_CFDP_RecvFin(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern int CF_CFDP_RecvNak(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph, int *num_segment_requests);
+/************************************************************************/
+/** @brief Build a fin PDU for transmit.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t     Pointer to the transaction object
+ * @param dc    Final delivery status code (complete or incomplete)
+ * @param fs    Final file status (retained or rejected, etc)
+ * @param cc    Final CFDP condition code
+ *
+ * @returns CF_SendRet_t status code
+ * @retval CF_SendRet_SUCCESS on success.
+ * @retval CF_SendRet_NO_MSG if message buffer cannot be obtained.
+ * @retval CF_SendRet_ERROR if an error occurred while building the packet.
+ */
+CF_SendRet_t CF_CFDP_SendFin(CF_Transaction_t *t, CF_CFDP_FinDeliveryCode_t dc, CF_CFDP_FinFileStatus_t fs,
+                             CF_CFDP_ConditionCode_t cc);
 
-/* Engine functional dispatch. These are all implemented in cf_cfdp_r.c or cf_cfdp_s.c */
-extern void CF_CFDP_S1_Recv(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern void CF_CFDP_R1_Recv(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern void CF_CFDP_S2_Recv(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern void CF_CFDP_R2_Recv(CF_Transaction_t *t, CF_CFDP_PduHeader_t *ph);
-extern void CF_CFDP_S1_Tx(CF_Transaction_t *t);
-extern void CF_CFDP_S2_Tx(CF_Transaction_t *t);
-extern void CF_CFDP_R_Tick(CF_Transaction_t *t, int *cont);
-extern void CF_CFDP_S_Tick(CF_Transaction_t *t, int *cont);
-extern void CF_CFDP_S_Tick_Nak(CF_Transaction_t *t, int *cont);
-extern void CF_CFDP_S_Cancel(CF_Transaction_t *t);
-extern void CF_CFDP_R_Cancel(CF_Transaction_t *t);
-extern void CF_CFDP_R_Init(CF_Transaction_t *t);
+/************************************************************************/
+/** @brief Send a previously-assembled nak PDU for transmit.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t   Pointer to the transaction object
+ * @param ph  Pointer to logical PDU buffer content
+ *
+ * @note Unlike other "send" routines, the NAK PDU must be acquired and
+ * filled by the caller prior to invoking this routine.  This routine only
+ * encodes and sends the previously-assembled PDU buffer.  As such, the
+ * typical failure possibilies do not apply to this call.
+ *
+ * @returns CF_SendRet_t status code
+ * @retval CF_SendRet_SUCCESS on success.
+ */
+CF_SendRet_t CF_CFDP_SendNak(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
 
-extern void CF_CFDP_CancelTransaction(CF_Transaction_t *t);
+/************************************************************************/
+/** @brief Appends a single TLV value to the logical PDU data
+ *
+ * This function implements common functionality between SendEof and SendFin
+ * which append a TLV value specifying the faulting entity ID.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       ptlv_list must not be NULL.
+ *       Only CF_CFDP_TLV_TYPE_ENTITY_ID type is currently implemented
+ *
+ * @param ptlv_list TLV list from current PDU buffer.
+ * @param tlv_type  Type of TLV to append.  Currently must be CF_CFDP_TLV_TYPE_ENTITY_ID.
+ */
+void CF_CFDP_AppendTlv(CF_Logical_TlvList_t *ptlv_list, CF_CFDP_TlvType_t tlv_type);
 
-extern CF_CFDP_PduHeader_t *CF_CFDP_MsgOutGet(const CF_Transaction_t *t, int silent);
+/************************************************************************/
+/** @brief Unpack a basic PDU header from a received message.
+ *
+ * @par Description
+ *       This interprets the common PDU header and the file directive header
+ *       (if applicable) and populates the logical PDU buffer.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       A new message has been received.
+ *
+ * @param chan_num The channel number for statistics purposes
+ * @param ph       The logical PDU buffer being received
+ *
+ * @returns integer status code
+ * @retval 0 on success
+ * @retval -1 on error
+ *
+ */
+int CF_CFDP_RecvPh(uint8 chan_num, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Unpack a metadata PDU from a received message.
+ *
+ * This should only be invoked for buffers that have been identified
+ * as a metadata PDU.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ *
+ * @returns integer status code
+ * @retval 0 on success
+ * @retval -1 on error
+ */
+int CF_CFDP_RecvMd(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Unpack a file data PDU from a received message.
+ *
+ * This should only be invoked for buffers that have been identified
+ * as a file data PDU.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ *
+ * @returns integer status code
+ * @retval 0 on success
+ * @retval -1 on error
+ *
+ */
+int CF_CFDP_RecvFd(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Unpack an eof PDU from a received message.
+ *
+ * This should only be invoked for buffers that have been identified
+ * as an end of file PDU.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ *
+ * @returns integer status code
+ * @retval 0 on success
+ * @retval -1 on error
+ *
+ */
+int CF_CFDP_RecvEof(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Unpack an ack PDU from a received message.
+ *
+ * This should only be invoked for buffers that have been identified
+ * as an acknowledgement PDU.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ *
+ * @returns integer status code
+ * @retval 0 on success
+ * @retval -1 on error
+ *
+ */
+int CF_CFDP_RecvAck(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Unpack an fin PDU from a received message.
+ *
+ * This should only be invoked for buffers that have been identified
+ * as an final PDU.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ *
+ * @returns integer status code
+ * @retval 0 on success
+ * @retval -1 on error
+ *
+ */
+int CF_CFDP_RecvFin(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Unpack a nak PDU from a received message.
+ *
+ * This should only be invoked for buffers that have been identified
+ * as an negative/non-acknowledgement PDU.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ *
+ * @returns integer status code
+ * @retval 0 on success
+ * @retval -1 on error
+ *
+ */
+int CF_CFDP_RecvNak(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Dispatch received packet to its handler.
+ *
+ * This dispatches the PDU to the appropriate handler
+ * based on the transaction state
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be null. It must be an initialized transaction.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ *
+ */
+void CF_CFDP_DispatchRecv(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Cancels a transaction.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ *
+ */
+void CF_CFDP_CancelTransaction(CF_Transaction_t *t);
+
+/************************************************************************/
+/** @brief Helper function to set tx file state in a transaction.
+ *
+ * This sets various fields inside a newly-allocated transaction
+ * structure appropriately for sending a file.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t          Pointer to the transaction state
+ * @param cfdp_class Set to class 1 or class 2
+ * @param keep       Whether to keep the local file
+ * @param chan       CF channel number
+ * @param priority   Priority of transfer
+ *
+ */
+void CF_CFDP_InitTxnTxFile(CF_Transaction_t *t, CF_CFDP_Class_t cfdp_class, uint8 keep, uint8 chan, uint8 priority);
 
 /* functions to handle LVs (length-value, cfdp spec) */
 /* returns number of bytes copied, or -1 on error */
-extern int CF_CFDP_CopyDataToLv(CF_CFDP_lv_t *dest_lv, const uint8 *data, uint32 len);
-extern int CF_CFDP_CopyDataFromLv(uint8 buf[CF_FILENAME_MAX_LEN], const CF_CFDP_lv_t *dest_lv);
 
-extern const int CF_max_chunks[CF_Direction_NUM][CF_NUM_CHANNELS];
+/************************************************************************/
+/** @brief Copy string data from a lv (length, value) pair.
+ *
+ * This copies a string value from an LV pair inside a PDU buffer.
+ * In CF this is used for file names embedded within PDUs.
+ *
+ * @note This function assures that the output string is terminated
+ * appropriately, such that it can be used as a normal C string.  As
+ * such, the buffer size must be at least 1 byte larger than the maximum
+ * string length.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       src_lv must not be NULL. buf must not be NULL.
+ *
+ * @param buf        Pointer to buffer to store string
+ * @param buf_maxsz  Total size of buffer pointer to by buf (usable size is 1 byte less, for termination)
+ * @param src_lv     Pointer to LV pair from logical PDU buffer
+ *
+ * @returns The resulting string length, NOT including termination character
+ * @retval -1 on error
+ */
+int CF_CFDP_CopyStringFromLV(char *buf, size_t buf_maxsz, const CF_Logical_Lv_t *src_lv);
 
-extern void CF_CFDP_ArmAckTimer(CF_Transaction_t *);
+/************************************************************************/
+/** @brief Arm the ack timer
+ *
+ * @par Description
+ *       Helper function to arm the ack timer and set the flag.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t          Pointer to the transaction state
+ */
+void CF_CFDP_ArmAckTimer(CF_Transaction_t *t);
 
-extern CF_Transaction_t *CF_CFDP_FindTransactionBySequenceNumber(CF_Channel_t *c, uint32 transaction_sequence_number,
-                                                                 CF_EntityId_t src_eid);
+/************************************************************************/
+/** @brief Receive state function to ignore a packet.
+ *
+ * @par Description
+ *       This function signature must match all receive state functions.
+ *       The parameter t is ignored here.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ */
+void CF_CFDP_RecvDrop(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief Receive state function to process new rx transaction.
+ *
+ * @par Description
+ *       An idle transaction has never had message processing performed on it.
+ *       Typically, the first packet received for a transaction would be
+ *       the metadata pdu. There's a special case for R2 where the metadata
+ *       pdu could be missed, and filedata comes in instead. In that case,
+ *       an R2 transaction must still be started.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       t must not be NULL. There must be a received message.
+ *
+ * @param t    Pointer to the transaction state
+ * @param ph   The logical PDU buffer being received
+ */
+void CF_CFDP_RecvIdle(CF_Transaction_t *t, CF_Logical_PduBuffer_t *ph);
+
+/************************************************************************/
+/** @brief List traversal function to close all files in all active transactions.
+ *
+ * This helper is used in conjunction with CF_CList_Traverse().
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       n must not be NULL.
+ *
+ * @param n       List node pointer
+ * @param context Opaque pointer, not used in this function
+ *
+ * @returns integer traversal code
+ * @retval Always CF_LIST_CONT indicate list traversal should not exit early.
+ */
+int CF_CFDP_CloseFiles(CF_CListNode_t *n, void *context);
+
+/************************************************************************/
+/** @brief Cycle the current active tx or make a new one active.
+ *
+ * @par Description
+ *       First traverses all tx transactions on the active queue. If at
+ *       least one is found, then it stops. Otherwise it moves a
+ *       transaction on the pending queue to the active queue and
+ *       tries again to find an active one.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       None
+ *
+ * @param c Channel to cycle
+ */
+void CF_CFDP_CycleTx(CF_Channel_t *c);
+
+/************************************************************************/
+/** @brief List traversal function that cycles the first active tx.
+ *
+ * This helper is used in conjunction with CF_CList_Traverse().
+ *
+ * @par Description
+ *       There can only be one active tx transaction per engine cycle.
+ *       This function finds the first active, and then sends file
+ *       data pdus until there are no outgoing message buffers.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       node must not be NULL. context must not be NULL.
+ *
+ * @param node    Pointer to list node
+ * @param context Pointer to CF_CFDP_CycleTx_args_t object (passed through)
+ *
+ * @returns integer traversal code
+ * @retval CF_CLIST_EXIT when it's found, which terminates list traversal
+ * @retval CF_CLIST_CONT when it's isn't found, which causes list traversal to continue
+ */
+int CF_CFDP_CycleTxFirstActive(CF_CListNode_t *node, void *context);
+
+/************************************************************************/
+/** @brief Call R and then S tick functions for all active transactions.
+ *
+ * @par Description
+ *       Traverses all transactions in the RX and TXW queues, and calls
+ *       their tick functions. Note that the TXW queue is used twice:
+ *       once for regular tick processing, and one for NAK response.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       c must not be NULL.
+ *
+ * @param c Channel to tick
+ */
+void CF_CFDP_TickTransactions(CF_Channel_t *c);
+
+/************************************************************************/
+/** @brief Step each active playback directory.
+ *
+ * @par Description
+ *       Check if a playback directory needs iterated, and if so does, and
+ *       if a valid file is found initiates playback on it.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       c must not be NULL. p must not be NULL.
+ *
+ * @param c  The channel associated with the playback
+ * @param p  The playback state
+ */
+void CF_CFDP_ProcessPlaybackDirectory(CF_Channel_t *c, CF_Playback_t *p);
+
+/************************************************************************/
+/** @brief Kick the dir playback if timer elapsed.
+ *
+ * @par Description
+ *       This function waits for the polling directory interval timer,
+ *       and if it has expired, starts a playback in the polling directory.
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       c must not be NULL.
+ *
+ * @param c  The channel associated with the playback
+ */
+void CF_CFDP_ProcessPollingDirectories(CF_Channel_t *c);
+
+/************************************************************************/
+/** @brief List traversal function that calls a r or s tick function.
+ *
+ * This helper is used in conjunction with CF_CList_Traverse().
+ *
+ * @par Assumptions, External Events, and Notes:
+ *       node must not be NULL. context must not be NULL.
+ *
+ * @param node    Pointer to list node
+ * @param context Pointer to CF_CFDP_Tick_args_t object (passed through)
+ *
+ * @returns integer traversal code
+ * @retval CF_CLIST_EXIT when it's found, which terminates list traversal
+ * @retval CF_CLIST_CONT when it's isn't found, which causes list traversal to continue
+ */
+int CF_CFDP_DoTick(CF_CListNode_t *node, void *context);
 
 #endif /* !CF_CFDP_H */

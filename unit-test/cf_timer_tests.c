@@ -1,6 +1,6 @@
 /* cf testing includes */
 #include "cf_test_utils.h"
-#include "cf_timer.c"
+#include "cf_timer.h"
 
 /*******************************************************************************
 **
@@ -37,11 +37,8 @@ void Test_CF_Timer_Sec2Ticks_ReturnExpectedValue(void)
     CF_AppData.config_table->ticks_per_second = dummy_ticks_per_second;
 
     /* Act */
-    result = CF_Timer_Sec2Ticks(arg_sec);
+    UtAssert_UINT32_EQ(CF_Timer_Sec2Ticks(arg_sec), arg_sec * dummy_ticks_per_second);
 
-    /* Assert */
-    UtAssert_True(result == arg_sec * dummy_ticks_per_second, "Result was %u and should be %u", result,
-                  arg_sec * dummy_ticks_per_second);
 } /* end Test_CF_Timer_Sec2Ticks_ReturnExpectedValue */
 
 /* end CF_Timer_Sec2Ticks tests */
@@ -72,9 +69,7 @@ void Test_CF_Timer_InitRelSec_ReceiveExpectedValue(void)
     CF_Timer_InitRelSec(arg_t, arg_rel_sec);
 
     /* Assert */
-    UtAssert_True(arg_t->tick == arg_rel_sec * dummy_ticks_per_second,
-                  "Timer ticks are %u and should be %u (return from CF_Timer_Sec2Ticks)", arg_t->tick,
-                  arg_rel_sec * dummy_ticks_per_second);
+    UtAssert_UINT32_EQ(arg_t->tick, arg_rel_sec * dummy_ticks_per_second);
 } /* end Test_CF_Timer_InitRelSec_ReceiveExpectedValue */
 
 /* end CF_Timer_InitRelSec tests */
@@ -89,48 +84,38 @@ void Test_CF_Timer_Expired_When_t_tick_Is_0_Return_1(void)
 {
     /* Arrange */
     CF_Timer_t dummy_timer;
-    dummy_timer.tick        = 0;
-    const CF_Timer_t *arg_t = &dummy_timer;
-    int               local_result;
+    dummy_timer.tick                  = 0;
+    const CF_Timer_t *arg_t           = &dummy_timer;
     int               expected_result = 1;
 
     /* Act */
-    local_result = CF_Timer_Expired(arg_t);
+    UtAssert_INT32_EQ(CF_Timer_Expired(arg_t), expected_result);
 
-    /* Assert */
-    UtAssert_True(local_result == expected_result, "Result was %u and should be %u", local_result, expected_result);
 } /* end Test_CF_Timer_Expired_When_t_tick_Is_0_Return_1 */
 
 void Test_CF_Timer_Expired_When_t_tick_Is_1_Return_0(void)
 {
     /* Arrange */
     CF_Timer_t dummy_timer;
-    dummy_timer.tick        = 1;
-    const CF_Timer_t *arg_t = &dummy_timer;
-    int               local_result;
+    dummy_timer.tick                  = 1;
+    const CF_Timer_t *arg_t           = &dummy_timer;
     int               expected_result = 0;
 
     /* Act */
-    local_result = CF_Timer_Expired(arg_t);
+    UtAssert_INT32_EQ(CF_Timer_Expired(arg_t), expected_result);
 
-    /* Assert */
-    UtAssert_True(local_result == expected_result, "Result was %u and should be %u", local_result, expected_result);
 } /* end Test_CF_Timer_Expired_When_t_tick_Is_1_Return_0 */
 
 void Test_CF_Timer_Expired_When_t_tick_IsAnyIntegerExcept_0_Return_0(void)
 {
     /* Arrange */
     CF_Timer_t dummy_timer;
-    dummy_timer.tick        = Any_int_Except(0);
-    const CF_Timer_t *arg_t = &dummy_timer;
-    int               local_result;
+    dummy_timer.tick                  = Any_int_Except(0);
+    const CF_Timer_t *arg_t           = &dummy_timer;
     int               expected_result = 0;
 
     /* Act */
-    local_result = CF_Timer_Expired(arg_t);
-
-    /* Assert */
-    UtAssert_True(local_result == expected_result, "Result was %u and should be %u", local_result, expected_result);
+    UtAssert_INT32_EQ(CF_Timer_Expired(arg_t), expected_result);
 } /* end Test_CF_Timer_Expired_When_t_tick_IsAnyIntegerExcept_0_Return_0 */
 
 /* end CF_Timer_Expired tests */
@@ -164,8 +149,7 @@ void Test_CF_Timer_Tick_When_t_tick_Is_non0_Decrement_t_tick(void)
     CF_Timer_Tick(arg_t);
 
     /* Assert */
-    UtAssert_True(arg_t->tick == initial_tick - 1, "tick is %d and should have decreased by 1 from %d", arg_t->tick,
-                  initial_tick);
+    UtAssert_UINT32_EQ(arg_t->tick, initial_tick - 1);
 
 } /* Test_CF_Timer_Tick_When_t_tick_Is_non0_Decrement_t_tick */
 

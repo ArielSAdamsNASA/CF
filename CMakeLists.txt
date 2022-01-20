@@ -7,13 +7,14 @@ include_directories(${CFS_IO_LIB_MISSION_DIR}/fsw/public_inc)
 
 set(APP_SRC_FILES
   fsw/src/cf_app.c
-  fsw/src/cf_assert.c
   fsw/src/cf_cfdp.c
-  fsw/src/cf_cfdp_helpers.c
   fsw/src/cf_cfdp_r.c
   fsw/src/cf_cfdp_s.c
+  fsw/src/cf_cfdp_sbintf.c
+  fsw/src/cf_cfdp_dispatch.c
   fsw/src/cf_chunk.c
   fsw/src/cf_clist.c
+  fsw/src/cf_codec.c
   fsw/src/cf_cmd.c
   fsw/src/cf_crc.c
   fsw/src/cf_timer.c
@@ -26,10 +27,6 @@ add_cfe_app(cf ${APP_SRC_FILES})
 # configuration table
 add_cfe_tables(cf fsw/tables/cf_def_config.c)
 
-add_definitions("-D_DEFAULT_SOURCE")
-
-add_definitions(-D_DEFAULT_SOURCE=1)
-add_definitions(-D_EL -DENDIAN=_EL -DSOFTWARE_BIG_BIT_ORDER)
 if (ENABLE_UNIT_TESTS)
   add_subdirectory(unit-test)
 endif (ENABLE_UNIT_TESTS)

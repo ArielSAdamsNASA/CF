@@ -1,28 +1,28 @@
 /************************************************************************
-** File: cf_app.c
-**
-** NASA Docket No. GSC-18,447-1, and identified as “CFS CFDP (CF)
-** Application version 3.0.0”
-** Copyright © 2019 United States Government as represented by the
-** Administrator of the National Aeronautics and Space Administration.
-** All Rights Reserved.
-** Licensed under the Apache License, Version 2.0 (the "License"); you may
-** not use this file except in compliance with the License. You may obtain
-** a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-**
-** Unless required by applicable law or agreed to in writing, software
-** distributed under the License is distributed on an "AS IS" BASIS,
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-** See the License for the specific language governing permissions and
-** limitations under the License.
-**
-** Purpose:
-**  The CF Application main application source file
-**
-**  This file contains the functions that initialize the application and link
-**  all logic and functionality to the CFS.
-**
-*************************************************************************/
+ * File: cf_app.c
+ *
+ * NASA Docket No. GSC-18,447-1, and identified as “CFS CFDP (CF)
+ * Application version 3.0.0”
+ * Copyright © 2019 United States Government as represented by the
+ * Administrator of the National Aeronautics and Space Administration.
+ * All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License. You may obtain
+ * a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * Purpose:
+ *  The CF Application main application source file
+ *
+ *  This file contains the functions that initialize the application and link
+ *  all logic and functionality to the CFS.
+ *
+ ************************************************************************/
 
 #include "cfe.h"
 #include "cf_verify.h"
@@ -31,39 +31,35 @@
 #include "cf_perfids.h"
 #include "cf_cfdp.h"
 #include "cf_version.h"
+#include "cf_cmd.h"
 
 #include <string.h>
 
 CF_AppData_t CF_AppData;
 
-/************************************************************************/
-/** \brief Send CF housekeeping packet
-**
-**  \par Description
-**       The command to send the CF housekeeping packet comes in on
-**       the software bus. This function sends the message.
-**
-**  \par Assumptions, External Events, and Notes:
-**       None
-**
-*************************************************************************/
-static void CF_HkCmd(void)
+/*----------------------------------------------------------------
+ *
+ * Function: CF_HkCmd
+ *
+ * Application-scope internal function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
+void CF_HkCmd(void)
 {
     CFE_MSG_SetMsgTime(&CF_AppData.hk.tlm_header.Msg, CFE_TIME_GetTime());
     /* return value ignored */ CFE_SB_TransmitMsg(&CF_AppData.hk.tlm_header.Msg, true);
 }
 
-/************************************************************************/
-/** \brief Checks to see if a table update is pending, and perform it.
-**
-**  \par Description
-**       Updates the table if the engine is disabled.
-**
-**  \par Assumptions, External Events, and Notes:
-**       None
-**
-*************************************************************************/
-static void CF_CheckTables(void)
+/*----------------------------------------------------------------
+ *
+ * Function: CF_CheckTables
+ *
+ * Application-scope internal function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
+void CF_CheckTables(void)
 {
     CFE_Status_t status;
 
@@ -88,7 +84,7 @@ static void CF_CheckTables(void)
         if (status < CFE_SUCCESS)
         {
             CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_CHECK_REL, CFE_EVS_EventType_ERROR,
-                              "CF: error in CFE_TBL_ReleaseAddress (check), returned 0x%08x", status);
+                              "CF: error in CFE_TBL_ReleaseAddress (check), returned 0x%08lx", (unsigned long)status);
             CF_AppData.run_status = CFE_ES_RunStatus_APP_ERROR;
         }
 
@@ -96,7 +92,7 @@ static void CF_CheckTables(void)
         if (status < CFE_SUCCESS)
         {
             CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_CHECK_MAN, CFE_EVS_EventType_ERROR,
-                              "CF: error in CFE_TBL_Manage (check), returned 0x%08x", status);
+                              "CF: error in CFE_TBL_Manage (check), returned 0x%08lx", (unsigned long)status);
             CF_AppData.run_status = CFE_ES_RunStatus_APP_ERROR;
         }
 
@@ -104,28 +100,21 @@ static void CF_CheckTables(void)
         if (status < CFE_SUCCESS)
         {
             CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_CHECK_GA, CFE_EVS_EventType_ERROR,
-                              "CF: failed to get table address (check), returned 0x%08x", status);
+                              "CF: failed to get table address (check), returned 0x%08lx", (unsigned long)status);
             CF_AppData.run_status = CFE_ES_RunStatus_APP_ERROR;
         }
     }
 }
 
-/************************************************************************/
-/** \brief Validation function for config table.
-**
-**  \par Description
-**       Checks that the config table being loaded has correct data.
-**
-**  \par Assumptions, External Events, and Notes:
-**       None
-**
-**  \returns
-**  \retcode #CFE_SUCCESS \retdesc \copydoc CFE_SUCCESSS \endcode
-**  \retstmt Returns anything else on error.             \endcode
-**  \endreturns
-**
-*************************************************************************/
-static int32 CF_ValidateConfigTable(void *tbl_ptr)
+/*----------------------------------------------------------------
+ *
+ * Function: CF_ValidateConfigTable
+ *
+ * Application-scope internal function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
+int32 CF_ValidateConfigTable(void *tbl_ptr)
 {
     CF_ConfigTable_t  *tbl = (CF_ConfigTable_t *)tbl_ptr;
     int32              ret; /* initialized below */
@@ -158,19 +147,15 @@ static int32 CF_ValidateConfigTable(void *tbl_ptr)
     return ret;
 }
 
-/************************************************************************/
-/** \brief Load the table on application start
-**
-**  \par Assumptions, External Events, and Notes:
-**       None
-**
-**  \returns
-**  \retcode #CFE_SUCCESS \retdesc \copydoc CFE_SUCCESSS \endcode
-**  \retstmt Returns anything else on error.             \endcode
-**  \endreturns
-**
-*************************************************************************/
-static int32 CF_TableInit(void)
+/*----------------------------------------------------------------
+ *
+ * Function: CF_TableInit
+ *
+ * Application-scope internal function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
+int32 CF_TableInit(void)
 {
     int32 status = CFE_SUCCESS;
 
@@ -179,15 +164,15 @@ static int32 CF_TableInit(void)
     if (status != CFE_SUCCESS)
     {
         CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_REG, CFE_EVS_EventType_ERROR,
-                          "CF: error registering table, returned 0x%08x", status);
+                          "CF: error registering table, returned 0x%08lx", (unsigned long)status);
         goto err_out;
     }
 
     status = CFE_TBL_Load(CF_AppData.config_handle, CFE_TBL_SRC_FILE, CF_CONFIG_TABLE_FILENAME);
     if (status != CFE_SUCCESS)
     {
-        CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_LOAD, CFE_EVS_EventType_ERROR, "CF: error loading table, returned 0x%08x",
-                          status);
+        CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_LOAD, CFE_EVS_EventType_ERROR,
+                          "CF: error loading table, returned 0x%08lx", (unsigned long)status);
         goto err_out;
     }
 
@@ -195,7 +180,7 @@ static int32 CF_TableInit(void)
     if (status != CFE_SUCCESS)
     {
         CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_MANAGE, CFE_EVS_EventType_ERROR,
-                          "CF: error in CFE_TBL_Manage, returned 0x%08x", status);
+                          "CF: error in CFE_TBL_Manage, returned 0x%08lx", (unsigned long)status);
         goto err_out;
     }
 
@@ -204,7 +189,7 @@ static int32 CF_TableInit(void)
     if ((status != CFE_TBL_INFO_UPDATED) && (status != CFE_SUCCESS))
     {
         CFE_EVS_SendEvent(CF_EID_ERR_INIT_TBL_GETADDR, CFE_EVS_EventType_ERROR,
-                          "CF: error getting table address, returned 0x%08x", status);
+                          "CF: error getting table address, returned 0x%08lx", (unsigned long)status);
         goto err_out;
     }
     else
@@ -216,23 +201,15 @@ err_out:
     return status;
 }
 
-/************************************************************************/
-/** \brief CF app init function
-**
-**  \par Description
-**       Initializes all aspects of the CF application. Messages,
-**       pipes, events, table, and the cfdp engine.
-**
-**  \par Assumptions, External Events, and Notes:
-**       This must only be called once.
-**
-**  \returns
-**  \retcode #CFE_SUCCESS \retdesc \copydoc CFE_SUCCESSS \endcode
-**  \retstmt Returns anything else on error.             \endcode
-**  \endreturns
-**
-*************************************************************************/
-static int32 CF_Init(void)
+/*----------------------------------------------------------------
+ *
+ * Function: CF_Init
+ *
+ * Application-scope internal function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
+int32 CF_Init(void)
 {
     static CFE_EVS_BinFilter_t cf_event_filters[] = {
         {CF_EID_ERR_ASSERT, 0x0000},
@@ -341,37 +318,35 @@ static int32 CF_Init(void)
         {CF_EID_ERR_CMD_WHIST_WRITE, 0x0000},
     };
 
-    int32 status = CFE_SUCCESS;
+    int32                            status       = CFE_SUCCESS;
+    static const CFE_SB_MsgId_Atom_t MID_VALUES[] = {CF_CMD_MID, CF_SEND_HK_MID, CF_WAKE_UP_MID};
+    uint32                           i;
 
     CF_AppData.run_status = CFE_ES_RunStatus_APP_RUN;
 
-    CFE_MSG_Init(&CF_AppData.hk.tlm_header.Msg, CF_HK_TLM_MID, sizeof(CF_AppData.hk));
-    CFE_MSG_Init(&CF_AppData.cfg.tlm_header.Msg, CF_CONFIG_TLM_MID, sizeof(CF_AppData.cfg));
+    CFE_MSG_Init(&CF_AppData.hk.tlm_header.Msg, CFE_SB_ValueToMsgId(CF_HK_TLM_MID), sizeof(CF_AppData.hk));
+    CFE_MSG_Init(&CF_AppData.cfg.tlm_header.Msg, CFE_SB_ValueToMsgId(CF_CONFIG_TLM_MID), sizeof(CF_AppData.cfg));
 
     if ((status = CFE_EVS_Register(cf_event_filters, sizeof(cf_event_filters) / sizeof(*cf_event_filters),
                                    CFE_EVS_EventFilter_BINARY)) != CFE_SUCCESS)
     {
-        CFE_ES_WriteToSysLog("CF app: error registering with EVS, returned 0x%08x", status);
+        CFE_ES_WriteToSysLog("CF app: error registering with EVS, returned 0x%08lx", (unsigned long)status);
         goto err_out;
     }
 
     if ((status = CFE_SB_CreatePipe(&CF_AppData.cmd_pipe, CF_PIPE_DEPTH, CF_PIPE_NAME)) != CFE_SUCCESS)
     {
-        CFE_ES_WriteToSysLog("CF app: error creating pipe %s, returend 0x%08x", CF_PIPE_NAME, status);
+        CFE_ES_WriteToSysLog("CF app: error creating pipe %s, returend 0x%08lx", CF_PIPE_NAME, (unsigned long)status);
         goto err_out;
     }
 
+    for (i = 0; i < (sizeof(MID_VALUES) / sizeof(MID_VALUES[0])); ++i)
     {
-        const CFE_SB_MsgId_t mids[] = {CF_CMD_MID, CF_SEND_HK_MID, CF_WAKE_UP_MID};
-        int                  i;
-
-        for (i = 0; i < (sizeof(mids) / sizeof(*mids)); ++i)
+        if ((status = CFE_SB_Subscribe(CFE_SB_ValueToMsgId(MID_VALUES[i]), CF_AppData.cmd_pipe)) != CFE_SUCCESS)
         {
-            if ((status = CFE_SB_Subscribe(mids[i], CF_AppData.cmd_pipe)) != CFE_SUCCESS)
-            {
-                CFE_ES_WriteToSysLog("CF app: failed to subscribe to MID 0x%04x, returned 0x%08x", mids[i], status);
-                goto err_out;
-            }
+            CFE_ES_WriteToSysLog("CF app: failed to subscribe to MID 0x%04lx, returned 0x%08lx",
+                                 (unsigned long)MID_VALUES[i], (unsigned long)status);
+            goto err_out;
         }
     }
 
@@ -392,7 +367,7 @@ static int32 CF_Init(void)
 
     if (status != CFE_SUCCESS)
     {
-        CFE_ES_WriteToSysLog("CF: error sending init event, returned 0x%08x", status);
+        CFE_ES_WriteToSysLog("CF: error sending init event, returned 0x%08lx", (unsigned long)status);
         goto err_out;
     }
 
@@ -400,41 +375,36 @@ err_out:
     return status;
 }
 
-/************************************************************************/
-/** \brief CF wakeup function
-**
-**  \par Description
-**       Performs a single engine cycle for each wakeup
-**
-**  \par Assumptions, External Events, and Notes:
-**       None
-**
-*************************************************************************/
-static void CF_WakeUp(void)
+/*----------------------------------------------------------------
+ *
+ * Function: CF_WakeUp
+ *
+ * Application-scope internal function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
+void CF_WakeUp(void)
 {
     CFE_ES_PerfLogEntry(CF_PERF_ID_CYCLE_ENG);
     CF_CFDP_CycleEngine();
     CFE_ES_PerfLogExit(CF_PERF_ID_CYCLE_ENG);
 }
 
-/************************************************************************/
-/** \brief CF message processing function
-**
-**  \par Description
-**       Initializes all aspects of the CF application. Messages,
-**       pipes, events, table, and the cfdp engine.
-**
-**  \par Assumptions, External Events, and Notes:
-**       msg must not be NULL.
-**
-*************************************************************************/
-static void CF_ProcessMsg(CFE_SB_Buffer_t *msg)
+/*----------------------------------------------------------------
+ *
+ * Function: CF_ProcessMsg
+ *
+ * Application-scope internal function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
+void CF_ProcessMsg(CFE_SB_Buffer_t *msg)
 {
     CFE_SB_MsgId_t msg_id;
 
     CFE_MSG_GetMsgId(&msg->Msg, &msg_id);
 
-    switch (msg_id)
+    switch (CFE_SB_MsgIdToValue(msg_id))
     {
         case CF_CMD_MID:
             CF_ProcessGroundCommand(msg);
@@ -452,22 +422,19 @@ static void CF_ProcessMsg(CFE_SB_Buffer_t *msg)
         default:
             ++CF_AppData.hk.counters.err;
             CFE_EVS_SendEvent(CF_EID_ERR_INIT_CMD_LENGTH, CFE_EVS_EventType_ERROR,
-                              "CF: invalid command packet id=0x%02x", msg_id);
+                              "CF: invalid command packet id=0x%lx", (unsigned long)CFE_SB_MsgIdToValue(msg_id));
             break;
     }
 }
 
-/************************************************************************/
-/** \brief CF app entry point
-**
-**  \par Description
-**       Main entry point of CF application.
-**       Calls the init function and manages the app run loop.
-**
-**  \par Assumptions, External Events, and Notes:
-**       This must only be called once.
-**
-*************************************************************************/
+/*----------------------------------------------------------------
+ *
+ * Function: CF_AppMain
+ *
+ * Entry point function
+ * See description in cf_app.h for argument/return detail
+ *
+ *-----------------------------------------------------------------*/
 void CF_AppMain(void)
 {
     int32            status;
@@ -501,7 +468,7 @@ void CF_AppMain(void)
         else if (status != CFE_SB_TIME_OUT && status != CFE_SB_NO_MESSAGE)
         {
             CFE_EVS_SendEvent(CF_EID_ERR_INIT_MSG_RECV, CFE_EVS_EventType_ERROR,
-                              "CF: exiting due to CFE_SB_ReceiveBuffer error 0x%08x", status);
+                              "CF: exiting due to CFE_SB_ReceiveBuffer error 0x%08lx", (unsigned long)status);
             CF_AppData.run_status = CFE_ES_RunStatus_APP_ERROR;
         }
         else

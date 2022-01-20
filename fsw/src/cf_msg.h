@@ -1,28 +1,27 @@
 /************************************************************************
-** File: cf_msg.h
-**
-** NASA Docket No. GSC-18,447-1, and identified as “CFS CFDP (CF)
-** Application version 3.0.0”
-** Copyright © 2019 United States Government as represented by the
-** Administrator of the National Aeronautics and Space Administration.
-** All Rights Reserved.
-** Licensed under the Apache License, Version 2.0 (the "License"); you may
-** not use this file except in compliance with the License. You may obtain
-** a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
-**
-** Unless required by applicable law or agreed to in writing, software
-** distributed under the License is distributed on an "AS IS" BASIS,
-** WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-** See the License for the specific language governing permissions and
-** limitations under the License.
-**
-**
-** Purpose:
-**  The CF Application message definitions header file
-**
-**
-**
-*************************************************************************/
+ *
+ * NASA Docket No. GSC-18,447-1, and identified as “CFS CFDP (CF)
+ * Application version 3.0.0”
+ * Copyright © 2019 United States Government as represented by the
+ * Administrator of the National Aeronautics and Space Administration.
+ * All Rights Reserved.
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License. You may obtain
+ * a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ ************************************************************************/
+
+/**
+ * @file
+ *
+ *  The CF Application message definitions header file
+ */
 
 #ifndef CF_MSG_H
 #define CF_MSG_H
@@ -84,8 +83,8 @@ typedef struct CF_HkChannel_Data
     uint16          q_size[CF_QueueIdx_NUM];
     uint8           poll_counter;
     uint8           playback_counter;
-    uint8           frozen; /* NOTE: this could be more than one flag if we ever need it */
-    uint8           spare[3];
+    uint8           frozen;   /* NOTE: this could be more than one flag if we ever need it */
+    uint8           spare[7]; /* Structure has uint64 values in the counters, so size should be multiple of 8 */
 } CF_HkChannel_Data_t;
 
 typedef struct CF_HkPacket
@@ -94,6 +93,8 @@ typedef struct CF_HkPacket
 
     /* app HK */
     CF_HkCmdCounters_t counters;
+
+    uint8 spare[4]; /* CF_HkCmdCounters_t is 4 bytes, and CF_HkChannel_Data_t uses uint64 values  */
 
     /* per-channel HK */
     CF_HkChannel_Data_t channel_hk[CF_NUM_CHANNELS];
@@ -117,13 +118,12 @@ typedef struct CF_ConfigPacket
     uint8  nak_limit; /* number of times to retry NAK before giving up (resets on a single response */
 
     CF_EntityId_t local_eid;
-/* must #define the number of data items in this struct for command processing */
-#define CF_NUM_CFG_PACKET_ITEMS 10
+
 } CF_ConfigPacket_t;
 
 /****************************************
-** CF app command packet command codes
-****************************************/
+ * CF app command packet command codes
+ ***************************************/
 
 /* NOTE: these are what was in the original app (may have slightly different names)
  * Not sure that we need to implement all these for cf 3.0 */
@@ -152,14 +152,15 @@ typedef enum
     CF_ENABLE_DIR_POLLING_CC  = 18,
     CF_DISABLE_DIR_POLLING_CC = 19,
     CF_DELETE_QUEUE_NODE_CC   = 20,
+    CF_PURGE_QUEUE_CC         = 21,
     CF_ENABLE_ENGINE_CC       = 22,
     CF_DISABLE_ENGINE_CC      = 23,
     CF_NUM_COMMANDS           = 24,
 } CF_CMDS;
 
 /****************************
-**  CF Command Formats     **
-*****************************/
+ *  CF Command Formats     **
+ ****************************/
 typedef struct CF_NoArgsCmd
 {
     CFE_MSG_CommandHeader_t cmd_header;
@@ -183,6 +184,27 @@ typedef struct
     CF_UnionArgs_Payload_t  data;
 } CF_UnionArgsCmd_t;
 
+/**
+ * @brief Parameter IDs for use with Get/Set param messages
+ *
+ * Specifically these are used for the "key" field within CF_GetParamCmd_t and
+ * CF_SetParamCmd_t message structures.
+ */
+typedef enum
+{
+    CF_GetSet_ValueID_ticks_per_second,
+    CF_GetSet_ValueID_rx_crc_calc_bytes_per_wakeup,
+    CF_GetSet_ValueID_ack_timer_s,
+    CF_GetSet_ValueID_nak_timer_s,
+    CF_GetSet_ValueID_inactivity_timer_s,
+    CF_GetSet_ValueID_outgoing_file_chunk_size,
+    CF_GetSet_ValueID_ack_limit,
+    CF_GetSet_ValueID_nak_limit,
+    CF_GetSet_ValueID_local_eid,
+    CF_GetSet_ValueID_chan_max_outgoing_messages_per_wakeup,
+    CF_GetSet_ValueID_MAX
+} CF_GetSet_ValueID_t;
+
 typedef struct CF_GetParamCmd
 {
     CFE_MSG_CommandHeader_t cmd_header;
@@ -196,6 +218,7 @@ typedef struct CF_SetParamCmd
     uint32                  value;
     uint8                   key;
     uint8                   chan_num;
+    uint8                   spare[2]; /* Required to make the size a multiple of uint32 */
 } CF_SetParamCmd_t;
 
 typedef struct CF_TxFileCmd
@@ -227,7 +250,8 @@ typedef struct CF_TransactionCmd
     CFE_MSG_CommandHeader_t cmd_header;
     CF_TransactionSeq_t     ts;
     CF_EntityId_t           eid;
-    uint8                   chan; /* if 254, use ts. if 255, all channels */
+    uint8                   chan;     /* if 254, use ts. if 255, all channels */
+    uint8                   spare[3]; /* To make structure a multiple of uint32 */
 } CF_TransactionCmd_t;
 
 #endif /* !CF_MSG_H */
