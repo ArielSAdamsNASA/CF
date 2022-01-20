@@ -38,10 +38,20 @@ jobs:
           repository: nasa/cFS
           submodules: true 
 
-      - name: Checkout CF
+      - name: Checkout bundle
+        uses: actions/checkout@v2
+        with:
+          path: apps/CF
+          
+      - name: ls
         run: |
           cd apps
-          git clone https://github.com/nasa/CF.git
+          ls
+     
+      - name: ls
+        run: |
+          cd apps/CF
+          ls
           
       - name: Add CF app
         run: |
