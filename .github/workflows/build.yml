@@ -48,8 +48,7 @@ jobs:
         
       - name: Add CF app
         run: |
-          sudo apt-get install sed -y
-          sed -i -e 's|CFE_APP, sch_lab,     SCH_Lab_AppMain,    SCH_LAB_APP,  80,   16384, 0x0, 0;| CFE_APP, CF, CF_AppMain, CF_APP, 80, 16384, 0x0, 0; |g' cfe/cmake/sample_defs/cpu1_cfe_es_startup.scr
+          sed -i '7i CFE_APP, CF, CF_AppMain, CF_APP, 80, 16384, 0x0, 0; \n' cfe/cmake/sample_defs/cpu1_cfe_es_startup.scr
           sed -i -e 's|SET(cpu1_APPLIST ci_lab to_lab sch_lab)| SET(cpu1_APPLIST ci_lab to_lab sch_lab CF) |g' cfe/cmake/sample_defs/targets.cmake 
           sed -i -e 's|add_cfe_tables(cf fsw/tables/cf_def_config.c)| add_cfe_tables(CF fsw/tables/cf_def_config.c) |g' apps/CF/CMakeLists.txt
           sed -i -e 's|add_cfe_app(cf ${APP_SRC_FILES})| add_cfe_app(CF ${APP_SRC_FILES}) |g' apps/CF/CMakeLists.txt
